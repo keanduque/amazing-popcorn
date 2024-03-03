@@ -1,22 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import StarRating from "./StarRating";
-import { useMovies } from "./useMovies";
-import { useLocalStorageState } from "./useLocalStorageState";
-import { useKey } from "./useKey";
-
-const KEY = "9d42cc4b";
 
 const average = (arr) =>
     arr.reduce((acc, cur, i, arr) => acc + cur / arr.length, 0);
 
+const KEY = "9d42cc4b";
+
 export default function App() {
     const [query, setQuery] = useState("");
+    const [movies, setMovies] = useState([]);
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState("");
     const [selectedId, setSelectedId] = useState(null);
-    //custom hooks from useMovies.jsx
-    const { movies, isLoading, error } = useMovies(query);
+    //const [watched, setWatched] = useState([]);
 
-    //custom hooks for local storage of watched movies on the browser
-    const [watched, setWatched] = useLocalStorageState([], "watched");
+    const [watched, setWatched] = useState(function () {
+        const storedValue = localStorage.getItem("watched");
+        return JSON.parse(storedValue);
+    });
 
     function handleSelectMovie(id) {
         setSelectedId((selectedId) => (id === selectedId ? null : id));
@@ -29,9 +30,71 @@ export default function App() {
         // storing using event handler not able to synchrnize need to recreate in handleDeleteWatched when deleting local storage data
         //localStorage.setItem("watched", JSON.stringify([...watched, movie]));
     }
+
     function handleDeleteWatched(id) {
         setWatched((watched) => watched.filter((movie) => movie.imdbID !== id));
     }
+    // storing using useEffect - can effectively synchronize with the local storage
+    //local storage - key value pair storage available in the browser, store data per domain
+    // need to use JSON.stringify to convert to string. in local storage it can only store for key value pairs which are the values are string.
+    useEffect(
+        function () {
+            // no need to create new array because it can updated watched become new state on mount
+            localStorage.setItem("watched", JSON.stringify(watched));
+        },
+        [watched]
+    );
+
+    // register an effect for fetching movie
+    useEffect(
+        function () {
+            // browser API for cleaning data fetching
+            const controller = new AbortController();
+
+            // contains the side effect that registered here not to run as the component rendered. instead after it painted to the screen.
+            async function fetchMovies() {
+                try {
+                    setIsLoading(true);
+                    setError("");
+                    const res = await fetch(
+                        `http://www.omdbapi.com/?apikey=${KEY}&s=${query}`,
+                        { signal: controller.signal }
+                    );
+                    if (!res.ok)
+                        throw new Error(
+                            "Something went wrong with fetching movies"
+                        );
+
+                    const data = await res.json();
+                    if (data.Response === "False")
+                        throw new Error("Movie not Found!");
+
+                    setMovies(data.Search);
+                    setError("");
+                } catch (err) {
+                    if (err.name !== "AbortError") {
+                        console.log(err.message);
+                        setError(err.message);
+                    }
+                } finally {
+                    setIsLoading(false);
+                }
+            }
+            if (query.length < 3) {
+                setMovies([]);
+                setError("");
+                return;
+            }
+
+            handleCloseMovie();
+            fetchMovies();
+
+            return function () {
+                controller.abort();
+            };
+        },
+        [query]
+    ); // [] empty array is dependency array
 
     return (
         <>
@@ -101,13 +164,27 @@ function Logo() {
 }
 function Search({ query, setQuery }) {
     const inputEl = useRef(null); // 1st step
+    // 3rd step
+    useEffect(
+        function () {
+            function callback(e) {
+                if (document.activeElement === inputEl.current) return;
 
-    // custom hook for useKey Enter Key
-    useKey("Enter", () => {
-        if (document.activeElement === inputEl.current) return;
-        inputEl.current.focus();
-        setQuery("");
-    });
+                if (e.code === "Enter") {
+                    inputEl.current.focus();
+                    setQuery("");
+                }
+            }
+            document.addEventListener("keydown", callback);
+            return () => document.addEventListener("keydown", callback);
+        },
+        [setQuery]
+    );
+    // useEffect(() => {
+    //     const el = document.querySelector(".search");
+    //     console.log(el);
+    //     el.focus();
+    // }, []);
 
     return (
         <input
@@ -213,7 +290,6 @@ function MovieDetails({ selectedId, onCloseMovie, onAddWatched, watched }) {
 
     const countRef = useRef(0); // count how many times the user select the rating
     // effect for registering behind the scenes the counter selected by the user for rating
-
     useEffect(() => {
         if (userRating) countRef.current = countRef.current + 1;
     }, [userRating]);
@@ -253,8 +329,24 @@ function MovieDetails({ selectedId, onCloseMovie, onAddWatched, watched }) {
         onCloseMovie();
     }
 
-    // useEffect for add addEventListener for keydown Escape - using custom Hooks
-    useKey("Escape", onCloseMovie);
+    // useEffect for add addEventListener for keydown Escape
+    useEffect(
+        function () {
+            function callback(e) {
+                if (e.code === "Escape") {
+                    onCloseMovie();
+                }
+            }
+            // add eventlistener everytime hitting escape key
+            document.addEventListener("keydown", callback);
+
+            // cleaning up event listener for useEffect rendering
+            return function () {
+                document.removeEventListener("keydown", callback);
+            };
+        },
+        [onCloseMovie]
+    );
 
     // getting movie details
     useEffect(

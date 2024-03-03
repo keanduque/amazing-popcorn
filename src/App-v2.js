@@ -1,37 +1,101 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import StarRating from "./StarRating";
-import { useMovies } from "./useMovies";
-import { useLocalStorageState } from "./useLocalStorageState";
-import { useKey } from "./useKey";
-
-const KEY = "9d42cc4b";
 
 const average = (arr) =>
     arr.reduce((acc, cur, i, arr) => acc + cur / arr.length, 0);
 
+const KEY = "9d42cc4b";
+
 export default function App() {
     const [query, setQuery] = useState("");
+    const [movies, setMovies] = useState([]);
+    const [watched, setWatched] = useState([]);
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState("");
     const [selectedId, setSelectedId] = useState(null);
-    //custom hooks from useMovies.jsx
-    const { movies, isLoading, error } = useMovies(query);
 
-    //custom hooks for local storage of watched movies on the browser
-    const [watched, setWatched] = useLocalStorageState([], "watched");
+    /*
+    useEffect(function () {
+        console.log("After initial render");
+    }, []);
+    useEffect(function () {
+        console.log(query);
+        console.log("After every render");
+    });
+    useEffect(
+        function () {
+            console.log(query);
+        },
+        [query]
+    );
+    console.log("During render");*/
 
     function handleSelectMovie(id) {
         setSelectedId((selectedId) => (id === selectedId ? null : id));
     }
+
     function handleCloseMovie() {
         setSelectedId(null);
     }
+
     function handleAddWatched(movie) {
         setWatched((watched) => [...watched, movie]);
-        // storing using event handler not able to synchrnize need to recreate in handleDeleteWatched when deleting local storage data
-        //localStorage.setItem("watched", JSON.stringify([...watched, movie]));
     }
+
     function handleDeleteWatched(id) {
         setWatched((watched) => watched.filter((movie) => movie.imdbID !== id));
     }
+
+    // register an effect for fetching movie
+    useEffect(
+        function () {
+            // browser API for cleaning data fetching
+            const controller = new AbortController();
+
+            // contains the side effect that registered here not to run as the component rendered. instead after it painted to the screen.
+            async function fetchMovies() {
+                try {
+                    setIsLoading(true);
+                    setError("");
+                    const res = await fetch(
+                        `http://www.omdbapi.com/?apikey=${KEY}&s=${query}`,
+                        { signal: controller.signal }
+                    );
+                    if (!res.ok)
+                        throw new Error(
+                            "Something went wrong with fetching movies"
+                        );
+
+                    const data = await res.json();
+                    if (data.Response === "False")
+                        throw new Error("Movie not Found!");
+
+                    setMovies(data.Search);
+                    setError("");
+                } catch (err) {
+                    if (err.name !== "AbortError") {
+                        console.log(err.message);
+                        setError(err.message);
+                    }
+                } finally {
+                    setIsLoading(false);
+                }
+            }
+            if (query.length < 3) {
+                setMovies([]);
+                setError("");
+                return;
+            }
+
+            handleCloseMovie();
+            fetchMovies();
+
+            return function () {
+                controller.abort();
+            };
+        },
+        [query]
+    ); // [] empty array is dependency array
 
     return (
         <>
@@ -73,6 +137,7 @@ export default function App() {
         </>
     );
 }
+
 function Loader() {
     return <p className="loader">Loading...</p>;
 }
@@ -83,6 +148,7 @@ function ErrorMessage({ message }) {
         </p>
     );
 }
+
 function NavBar({ children }) {
     return (
         <nav className="nav-bar">
@@ -100,15 +166,6 @@ function Logo() {
     );
 }
 function Search({ query, setQuery }) {
-    const inputEl = useRef(null); // 1st step
-
-    // custom hook for useKey Enter Key
-    useKey("Enter", () => {
-        if (document.activeElement === inputEl.current) return;
-        inputEl.current.focus();
-        setQuery("");
-    });
-
     return (
         <input
             className="search"
@@ -116,7 +173,6 @@ function Search({ query, setQuery }) {
             placeholder="Search movies..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            ref={inputEl} // 2nd step
         />
     );
 }
@@ -210,14 +266,6 @@ function MovieDetails({ selectedId, onCloseMovie, onAddWatched, watched }) {
     const [movie, setMovie] = useState({});
     const [isLoading, setIsLoading] = useState(false);
     const [userRating, setUserRating] = useState("");
-
-    const countRef = useRef(0); // count how many times the user select the rating
-    // effect for registering behind the scenes the counter selected by the user for rating
-
-    useEffect(() => {
-        if (userRating) countRef.current = countRef.current + 1;
-    }, [userRating]);
-
     // check if the movie already on the list based on selectedId and watched ID
     const isWatched = watched.map((movie) => movie.imdbID).includes(selectedId);
     const watchedUserRating = watched.find(
@@ -246,15 +294,30 @@ function MovieDetails({ selectedId, onCloseMovie, onAddWatched, watched }) {
             imdbRating: Number(imdbRating),
             runtime: Number(runtime.split(" ").at(0)),
             userRating,
-            countRatingDecisions: countRef.current,
         };
 
         onAddWatched(newWatchedMovie);
         onCloseMovie();
     }
 
-    // useEffect for add addEventListener for keydown Escape - using custom Hooks
-    useKey("Escape", onCloseMovie);
+    // useEffect for add addEventListener for keydown Escape
+    useEffect(
+        function () {
+            function callback(e) {
+                if (e.code === "Escape") {
+                    onCloseMovie();
+                }
+            }
+            // add eventlistener everytime hitting escape key
+            document.addEventListener("keydown", callback);
+
+            // cleaning up event listener for useEffect rendering
+            return function () {
+                document.removeEventListener("keydown", callback);
+            };
+        },
+        [onCloseMovie]
+    );
 
     // getting movie details
     useEffect(
