@@ -4,9 +4,11 @@ this app retrieve movies from the OMBDB API for open movie,
 this app can do the following :
 
 -   Search movie,
--   Select movie,
+-   Select movie and display to the watch lists,
 -   Add movie to the watched list,
--   rate movie
+-   rate movie,
+-   add to storage to saved watched list
+-   Delete watched movie to the list
 
 ## Other Info:
 
